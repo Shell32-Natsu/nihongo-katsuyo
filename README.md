@@ -32,41 +32,48 @@
 
 ## 部署到 Cloudflare
 
-整个过程都在网页上操作，不需要命令行。先部署网站，再申请 Google 登录。
+每次推送到 `main`，GitHub Actions 会先跑测试，通过后自动部署到 Cloudflare Workers（见 `.github/workflows/deploy.yml`）。Pull Request 只跑测试，不部署。第一次使用前需要在 GitHub 上配好 Cloudflare 的密钥。
 
-### 1. 部署网站
+### 1. 创建 Cloudflare API 令牌
 
-1. 登录 [Cloudflare 后台](https://dash.cloudflare.com)，进入 **Workers & Pages** → **Create** → **Import a repository**
-2. 连接 GitHub，选择 `nihongo-katsuyo` 仓库，其他保持默认（部署命令是 `npx wrangler deploy`），点 **Deploy**
-3. 第一次部署时会自动创建名为 `nihongo-katsuyo` 的 D1 数据库，数据表由 Worker 在第一次请求时自动建好
-4. 部署完成后会得到网址，形如 `https://nihongo-katsuyo.<你的子域>.workers.dev`
+1. 登录 [Cloudflare 后台](https://dash.cloudflare.com)。如果从来没用过 Workers，先打开一次 **Workers & Pages** 页面，按提示选一个 `workers.dev` 子域名
+2. 在 **Workers & Pages** 页面右侧找到 **Account ID** 并复制（它也是后台网址里 `dash.cloudflare.com/` 后面那串字符）
+3. 点右上角头像 → **Profile** → **API Tokens** → **Create Token**，选模板 **Edit Cloudflare Workers**
+4. 在权限里再加一行：**Account** → **D1** → **Edit**（用来创建和读写数据库）
+5. **Account Resources** 选你的账号，**Zone Resources** 选 All zones，然后创建并复制令牌（只显示一次）
 
-此时网站已经可以用，只是还不能登录同步。之后每次推送到 `main`，Cloudflare 都会自动重新部署。
+### 2. 把密钥填到 GitHub
 
-### 2. 申请 Google 登录
+打开 GitHub 仓库 → **Settings** → **Secrets and variables** → **Actions** → **Secrets** → **New repository secret**，添加两个：
+
+| 名称 | 值 |
+| --- | --- |
+| `CLOUDFLARE_API_TOKEN` | 上一步创建的令牌 |
+| `CLOUDFLARE_ACCOUNT_ID` | 上一步复制的 Account ID |
+
+然后到仓库的 **Actions** 页 → **测试并部署** → **Run workflow** 手动跑一次（或者随便推送一次到 `main`）。
+
+第一次部署会自动创建名为 `nihongo-katsuyo` 的 D1 数据库，数据表由 Worker 在第一次请求时自动建好。部署完成后，运行结果的摘要里会显示网址，形如 `https://nihongo-katsuyo.<你的子域>.workers.dev`。此时网站已经可以用，只是还不能登录同步。
+
+没配密钥时，部署这一步会跳过并给出提示，测试照常运行。
+
+### 3. 申请 Google 登录
 
 1. 打开 [Google Cloud Console](https://console.cloud.google.com)，新建一个项目
 2. 进入 **Google Auth Platform**（也叫 OAuth 同意屏幕），用户类型选 **External**，填应用名称和联系邮箱
 3. 在 **Audience** 里把发布状态改成 **In production**，否则只有你加进测试名单的账号能登录。这里只用到基础的姓名、邮箱、头像，不需要 Google 审核
-4. 在 **Clients** 里新建客户端，类型选 **Web application**，在 **Authorized JavaScript origins** 里填第 1 步得到的网址（不带结尾的 `/`）。用自己的域名的话也把域名加上；本地开发再加一个 `http://localhost:8787`
+4. 在 **Clients** 里新建客户端，类型选 **Web application**，在 **Authorized JavaScript origins** 里填第 2 步得到的网址（不带结尾的 `/`）。用自己的域名的话也把域名加上；本地开发再加一个 `http://localhost:8787`
 5. 复制生成的 **Client ID**（以 `.apps.googleusercontent.com` 结尾）
 
-### 3. 把 Client ID 填到 Cloudflare
+### 4. 把 Client ID 填到 GitHub
 
-在 Cloudflare 后台打开这个 Worker → **Settings** → **Variables and Secrets** → **Add**，类型选 Text，名称填 `GOOGLE_CLIENT_ID`，值填上一步复制的 Client ID，保存并部署。
+Client ID 不是机密，放在仓库变量里：GitHub 仓库 → **Settings** → **Secrets and variables** → **Actions** → **Variables** → **New repository variable**，名称填 `GOOGLE_CLIENT_ID`，值填上一步复制的 Client ID。
 
-刷新网站，账号栏就会出现「使用 Google 账号登录」按钮。`wrangler.toml` 里设置了 `keep_vars = true`，以后自动部署不会覆盖这个变量。
+再手动跑一次 **测试并部署**。刷新网站，账号栏就会出现「使用 Google 账号登录」按钮。
 
-> Google 登录和 `workers.dev` 域名在中国大陆都访问不了。大陆用户不登录也能正常练习，只是记录不能同步。
+### 可选：网页放在别的域名
 
-### 可选：网页放在 GitHub Pages
-
-如果想让网页继续放在 GitHub Pages、只把接口放在 Cloudflare：
-
-1. 把 `public/index.html` 里 `<meta name="katsuyo-api">` 的 `content` 改成 Worker 的网址
-2. 在 Worker 的变量里加 `ALLOWED_ORIGINS`，值为 `https://shell32-natsu.github.io`
-3. 在 Google 客户端的 Authorized JavaScript origins 里也加上这个地址
-4. GitHub Pages 的发布目录选 `public/`（需要用 GitHub Actions 发布，或把 `public/` 的内容放到 `docs/`）
+如果网页放在别处（比如 GitHub Pages）、只用 Cloudflare 提供同步接口：把 `public/index.html` 里 `<meta name="katsuyo-api">` 的 `content` 改成 Worker 的网址，在 Cloudflare 后台给 Worker 加变量 `ALLOWED_ORIGINS`（值为网页的地址，比如 `https://shell32-natsu.github.io`，多个用逗号分隔），并把这个地址也加到 Google 客户端的 Authorized JavaScript origins 里。
 
 ## 本地开发
 
@@ -92,7 +99,7 @@ npm test
 - **复习规则**：单词本的间隔升级、答错重来、提前答对不算、权重变化、清空记录，以及两台设备的记录不论按什么顺序合并，结果都一样
 - **后端**：用 Node 自带的 SQLite 模拟 D1，用自己生成的密钥模拟 Google 登录凭证，测试登录验证、两台设备同步、重复上传、设置以较新的为准、用户之间的数据隔离、分页和跨域
 
-推送和 Pull Request 时，GitHub Actions 会自动跑这些测试。
+推送和 Pull Request 时，GitHub Actions 会自动跑这些测试；测试不通过就不会部署。
 
 ## 目录结构
 
@@ -110,6 +117,7 @@ worker/
   google.js          Google 登录凭证验证
 test/                测试
 wrangler.toml        Cloudflare 配置
+.github/workflows/   自动测试和部署
 ```
 
 ## 数据是怎么存的

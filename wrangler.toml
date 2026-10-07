@@ -2,7 +2,7 @@
 name = "nihongo-katsuyo"
 main = "worker/index.js"
 compatibility_date = "2026-09-01"
-# 在 Cloudflare 后台设置的变量（比如 GOOGLE_CLIENT_ID）部署时保留，不会被这个文件覆盖
+# 部署时保留已经设置过的变量（GOOGLE_CLIENT_ID 由 GitHub Actions 传入，ALLOWED_ORIGINS 可在 Cloudflare 后台设置）
 keep_vars = true
 
 [assets]
