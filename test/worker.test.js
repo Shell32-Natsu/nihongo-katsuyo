@@ -88,32 +88,33 @@ test('名单解析：分隔符、大小写、整个域名', () => {
   assert.equal(isAllowed('a@x.com', []), false);
 });
 
-test('没登录：网页请求给登录页，静态文件和接口都拿不到', async () => {
+test('网页对所有人开放；没登录时同步接口都拿不到', async () => {
   const { page, call, assetsHits } = setup();
-  const p = await page('/');
-  assert.equal(p.status, 200);
-  assert.match(p.data, /活用練習帳/);
-  assert.match(p.data, /accounts\.google\.com\/gsi\/client/);
-  assert.ok(p.data.includes(JSON.stringify(CLIENT_ID)));
-  assert.equal(p.headers.get('cache-control'), 'no-store');
-  assert.equal((await call('GET', '/js/app.js')).status, 401);
-  assert.equal((await call('GET', '/style.css')).status, 401);
+  assert.equal((await page('/')).data, 'asset');
+  assert.equal((await call('GET', '/js/app.js')).data, 'asset');
+  assert.deepEqual(assetsHits, ['/', '/js/app.js']);
   assert.equal((await call('GET', '/api/me')).status, 401);
   assert.equal((await call('POST', '/api/sync', { body: {} })).status, 401);
-  assert.equal((await page('/', 'katsuyo_session=forged-token-forged-token-forged')).data.includes('gsi/client'), true);
-  assert.deepEqual(assetsHits, []);
+  assert.equal((await call('POST', '/api/sync', { body: {}, cookie: 'katsuyo_session=forged-token-forged-token-forged' })).status, 401);
 });
 
-test('名单里的账号登录后拿到 Cookie，能打开网页', async () => {
-  const { login, page, call, assetsHits } = setup();
+test('config 告诉页面是否开放同步，不需要数据库', async () => {
+  const on = setup({ DB: undefined });
+  assert.deepEqual((await on.call('GET', '/api/config')).data, { googleClientId: CLIENT_ID, syncEnabled: true });
+  const noList = setup({ DB: undefined, ALLOWED_EMAILS: ' ' });
+  assert.deepEqual((await noList.call('GET', '/api/config')).data, { googleClientId: CLIENT_ID, syncEnabled: false });
+  const noClient = setup({ DB: undefined, GOOGLE_CLIENT_ID: '' });
+  assert.deepEqual((await noClient.call('GET', '/api/config')).data, { googleClientId: null, syncEnabled: false });
+});
+
+test('名单里的账号登录后拿到 Cookie，能用同步接口', async () => {
+  const { login, call } = setup();
   const r = await login();
   assert.deepEqual(r.user, { id: 'g:1001', name: '夏冬', email: 'xia@example.com', picture: 'https://example.com/a.png' });
   assert.match(r.setCookie, /^katsuyo_session=[A-Za-z0-9_-]{40,}; Path=\/; HttpOnly; SameSite=Lax; Max-Age=\d+; Secure$/);
-  assert.equal((await page('/', r.cookie)).data, 'asset');
-  assert.equal((await call('GET', '/js/app.js', { cookie: r.cookie })).data, 'asset');
-  assert.deepEqual(assetsHits, ['/', '/js/app.js']);
   const me = await call('GET', '/api/me', { cookie: r.cookie });
   assert.equal(me.data.user.email, 'xia@example.com');
+  assert.equal((await call('POST', '/api/sync', { cookie: r.cookie, body: { since: 0 } })).status, 200);
 });
 
 test('名单里的域名下所有账号都能登录', async () => {
@@ -139,44 +140,24 @@ test('邮箱没验证过的 Google 账号不能登录', async () => {
   }
 });
 
-test('从名单里删掉后，已有的登录马上失效', async () => {
-  const { login, page, call, env, assetsHits } = setup();
+test('从名单里删掉后，同步马上失效，网页照常能用', async () => {
+  const { login, page, call, env } = setup();
   const { cookie } = await login();
   env.ALLOWED_EMAILS = 'bob@example.com';
-  const p = await page('/', cookie);
-  assert.match(p.data, /xia@example\.com/);
-  assert.match(p.data, /没有使用权限/);
-  assert.equal((await call('GET', '/style.css', { cookie })).status, 403);
   const me = await call('GET', '/api/me', { cookie });
   assert.equal(me.status, 403);
   assert.equal(me.data.email, 'xia@example.com');
-  assert.equal((await call('POST', '/api/sync', { cookie, body: { since: 0, events: [ev(1)] } })).status, 403);
-  assert.deepEqual(assetsHits, []);
+  const sync = await call('POST', '/api/sync', { cookie, body: { since: 0, events: [ev(1)] } });
+  assert.equal(sync.status, 403);
+  assert.equal(sync.data.email, 'xia@example.com');
+  assert.equal((await page('/', cookie)).data, 'asset');
 });
 
-test('没设置名单时谁都登录不了，登录页会说明原因', async () => {
-  const { call, page } = setup({ ALLOWED_EMAILS: '' });
+test('没设置名单时谁都登录不了', async () => {
+  const { call } = setup({ ALLOWED_EMAILS: '' });
   const r = await call('POST', '/api/auth/google', { body: { credential: await idToken() } });
   assert.equal(r.status, 403);
-  const p = await page('/');
-  assert.match(p.data, /ALLOWED_EMAILS/);
-  assert.doesNotMatch(p.data, /gsi\/client/);
-});
-
-test('没配置 Google 客户端 ID 时登录页会说明原因', async () => {
-  const { page } = setup({ GOOGLE_CLIENT_ID: '' });
-  const p = await page('/');
-  assert.match(p.data, /GOOGLE_CLIENT_ID/);
-  assert.doesNotMatch(p.data, /gsi\/client/);
-});
-
-test('登录页里的邮箱会被转义', async () => {
-  const { login, page, env } = setup({ ALLOWED_EMAILS: '<b>x</b>@example.com' });
-  const { cookie } = await login({ email: '<b>x</b>@example.com' });
-  env.ALLOWED_EMAILS = 'other@example.com';
-  const p = await page('/', cookie);
-  assert.ok(p.data.includes('&lt;b&gt;x&lt;/b&gt;@example.com'));
-  assert.ok(!p.data.includes('<b><b>x</b>'));
+  assert.equal(r.headers.get('set-cookie'), null);
 });
 
 test('无效的 Google 凭证被拒绝', async () => {
@@ -289,14 +270,13 @@ test('记录很多时分页下发', async () => {
   assert.equal(p2.data.more, false);
 });
 
-test('退出登录：清掉 Cookie，令牌失效，回到登录页', async () => {
-  const { call, login, page } = setup();
+test('退出登录：清掉 Cookie，令牌失效', async () => {
+  const { call, login } = setup();
   const { cookie } = await login();
   const r = await call('POST', '/api/logout', { cookie, body: {} });
   assert.equal(r.status, 200);
   assert.match(r.headers.get('set-cookie'), /^katsuyo_session=; .*Max-Age=0/);
   assert.equal((await call('GET', '/api/me', { cookie })).status, 401);
-  assert.match((await page('/', cookie)).data, /gsi\/client/);
 });
 
 test('本地 http 开发时 Cookie 不带 Secure', async () => {
@@ -310,9 +290,11 @@ test('本地 http 开发时 Cookie 不带 Secure', async () => {
   assert.doesNotMatch(res.headers.get('set-cookie'), /Secure/);
 });
 
-test('未知接口和错误方法', async () => {
-  const { call, login } = setup();
+test('未知接口、错误方法和找不到的网页', async () => {
+  const { call, login, assetsHits } = setup();
   const { cookie } = await login();
   assert.equal((await call('GET', '/api/nope', { cookie })).status, 404);
   assert.equal((await call('GET', '/api/sync', { cookie })).status, 405);
+  assert.equal((await call('GET', '/no-such-page')).data, 'asset');
+  assert.deepEqual(assetsHits, ['/no-such-page']);
 });

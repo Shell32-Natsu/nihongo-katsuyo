@@ -1,17 +1,14 @@
 // 活用練習帳 · Cloudflare Worker
 //
-// 整个网站只对名单里的 Google 账号开放（名单在环境变量 ALLOWED_EMAILS 里）。
-// 每个请求都先经过这里：
-//   - 没登录、登录已过期或不在名单里：网页请求返回登录页，其他请求返回 401/403
-//   - 登录且在名单里：网页和静态文件交给 Workers 静态资源（public/）
-// 接口：
+// 网页（public/）由 Workers 静态资源直接提供，谁都能打开练习。
+// 这里只处理 /api/* 的同步接口；登录同步只对名单里的 Google 账号开放（名单在环境变量 ALLOWED_EMAILS 里）。
+//   GET  /api/config        前端需要的配置：Google 客户端 ID、是否开放同步
 //   POST /api/auth/google   用 Google 登录凭证换登录 Cookie（只发给名单里的账号）
 //   GET  /api/me            当前登录的用户
 //   POST /api/logout        退出登录
 //   POST /api/sync          上传本机新增的答题记录和设置，取回其他设备的记录
 
 import { verifyGoogleIdToken, fetchGoogleKeys, AuthError } from './google.js';
-import { loginPage } from './login.js';
 
 const DAY = 86400e3;
 const SESSION_TTL = 365 * DAY;
@@ -57,16 +54,6 @@ function json(data, status = 200, headers = {}) {
   return new Response(JSON.stringify(data), {
     status,
     headers: { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store', ...headers },
-  });
-}
-
-function html(body, status = 200) {
-  return new Response(body, {
-    status,
-    headers: {
-      'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store',
-      'x-frame-options': 'DENY', 'referrer-policy': 'strict-origin-when-cross-origin',
-    },
   });
 }
 
@@ -143,8 +130,8 @@ async function currentUser(request, env, ctx) {
 
 async function requireUser(request, env, ctx) {
   const r = await currentUser(request, env, ctx);
-  if (r.status === 'none') throw new HttpError(401, '没有登录或登录已过期，请刷新页面重新登录');
-  if (r.status === 'denied') throw new HttpError(403, '这个账号没有使用权限', { email: r.email });
+  if (r.status === 'none') throw new HttpError(401, '没有登录或登录已过期');
+  if (r.status === 'denied') throw new HttpError(403, '这个账号没有同步权限', { email: r.email });
   return r;
 }
 
@@ -185,14 +172,19 @@ function cleanSettings(s) {
 
 export function createApp({ getGoogleKeys = fetchGoogleKeys } = {}) {
   const routes = {
+    'GET /api/config': async (req, env) => {
+      const googleClientId = env.GOOGLE_CLIENT_ID || null;
+      return { googleClientId, syncEnabled: !!googleClientId && parseAllowList(env.ALLOWED_EMAILS).length > 0 };
+    },
+
     'POST /api/auth/google': async (req, env, ctx, url) => {
       const list = parseAllowList(env.ALLOWED_EMAILS);
-      if (!list.length) throw new HttpError(403, '网站还没有设置允许使用的账号');
+      if (!list.length) throw new HttpError(403, '网站还没有开放同步');
       const { credential } = await readJson(req);
       const p = await verifyGoogleIdToken(credential, env.GOOGLE_CLIENT_ID, { getKeys: getGoogleKeys });
       // 只认 Google 验证过的邮箱，否则名单形同虚设
       if (!p.email || p.email_verified !== true) throw new HttpError(403, '这个 Google 账号的邮箱还没有验证');
-      if (!isAllowed(p.email, list)) throw new HttpError(403, '这个账号没有使用权限', { email: p.email });
+      if (!isAllowed(p.email, list)) throw new HttpError(403, '这个账号没有同步权限', { email: p.email });
 
       const id = 'g:' + p.sub;
       const now = Date.now();
@@ -281,33 +273,23 @@ export function createApp({ getGoogleKeys = fetchGoogleKeys } = {}) {
     return out instanceof Response ? out : json(out);
   }
 
-  // 网页和静态文件：登录且在名单里才给，否则给登录页
-  async function handlePage(request, env, ctx) {
-    const r = await currentUser(request, env, ctx);
-    if (r.status === 'ok') return env.ASSETS.fetch(request);
-    const wantsPage = request.method === 'GET' && (request.headers.get('accept') || '').includes('text/html');
-    if (!wantsPage) return new Response(r.status === 'denied' ? '没有使用权限' : '请先登录', { status: r.status === 'denied' ? 403 : 401, headers: { 'cache-control': 'no-store' } });
-    return html(loginPage({
-      clientId: env.GOOGLE_CLIENT_ID || null,
-      listReady: parseAllowList(env.ALLOWED_EMAILS).length > 0,
-      denied: r.status === 'denied' ? r.email : '',
-    }));
-  }
-
   return {
     async fetch(request, env, ctx) {
       const url = new URL(request.url);
-      const isApi = url.pathname.startsWith('/api/');
+      // 静态文件一般不会走到这里（Cloudflare 直接提供）；找不到的路径交回静态资源，返回 404
+      if (!url.pathname.startsWith('/api/')) return env.ASSETS ? env.ASSETS.fetch(request) : new Response('Not found', { status: 404 });
       try {
-        if (!env.DB) throw new HttpError(503, '服务器没有配置数据库');
-        await ensureSchema(env.DB);
-        return isApi ? await handleApi(request, env, ctx, url) : await handlePage(request, env, ctx);
+        if (url.pathname !== '/api/config') {
+          if (!env.DB) throw new HttpError(503, '服务器没有配置数据库');
+          await ensureSchema(env.DB);
+        }
+        return await handleApi(request, env, ctx, url);
       } catch (e) {
         let status = 500, message = '服务器出错了，请稍后再试', extra = {};
         if (e instanceof HttpError) { status = e.status; message = e.message; extra = e.extra; }
         else if (e instanceof AuthError) { status = 401; message = e.message; }
         else console.error(e);
-        return isApi ? json({ error: message, ...extra }, status) : new Response(message, { status, headers: { 'content-type': 'text/plain; charset=utf-8' } });
+        return json({ error: message, ...extra }, status);
       }
     },
   };
