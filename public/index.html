@@ -12,6 +12,8 @@
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Klee+One:wght@400;600&family=Zen+Kaku+Gothic+New:wght@400;500;700&family=IBM+Plex+Mono:wght@500&display=swap">
 <link rel="stylesheet" href="style.css">
+<!-- 同步接口的地址。网页和接口在同一个 Cloudflare Worker 上时留空；网页放在别处（比如 GitHub Pages）时填 Worker 的网址 -->
+<meta name="katsuyo-api" content="">
 </head>
 <body>
 <div class="wrap">
@@ -22,6 +24,10 @@
     </div>
     <div class="score" id="score" aria-live="polite"></div>
   </header>
+
+  <div class="account" id="account">
+    <div class="acct-main"><div class="acct-text"><span class="acct-status"><span class="dot"></span><span>记录保存在这台设备上</span></span></div></div>
+  </div>
 
   <details class="setup" id="setup">
     <summary><span class="sum-label">练习设置</span><span class="sum-text" id="sumText"></span><span class="sum-caret" aria-hidden="true">▾</span></summary>
@@ -55,27 +61,40 @@
     </div>
   </details>
 
+  <div class="due-banner" id="dueBanner" hidden></div>
+
   <main class="sheet" id="sheet" aria-live="polite"></main>
 
-  <section class="review">
-    <div class="panel">
-      <h2>各变形正确率 <small>累计</small></h2>
-      <div class="rates" id="rates"></div>
+  <section class="panel" id="book" aria-labelledby="bookTitle">
+    <div class="panel-head">
+      <h2 id="bookTitle">单词本 <small>答错的词自动记进来，按间隔安排复习</small></h2>
+      <button type="button" class="btn small" id="reviewBtn">开始复习</button>
     </div>
-    <div class="panel">
-      <h2>错题本 <small id="mcount"></small></h2>
-      <ul class="mlist" id="mlist"></ul>
-      <div class="row">
-        <button type="button" class="btn small ghost" id="drillBtn">专练错题</button>
-        <button type="button" class="btn small warn" id="resetBtn">清空记录</button>
-      </div>
+    <div class="counts" id="counts"></div>
+    <div class="tabs" role="tablist" aria-label="单词本分类">
+      <button type="button" class="tab" role="tab" id="tab-due" data-tab="due">待复习<small></small></button>
+      <button type="button" class="tab" role="tab" id="tab-book" data-tab="book">单词本<small></small></button>
+      <button type="button" class="tab" role="tab" id="tab-all" data-tab="all">全部单词<small></small></button>
+    </div>
+    <ul class="wlist" id="wlist" role="tabpanel"></ul>
+    <button type="button" class="linkish" id="moreBtn" hidden>显示更多</button>
+  </section>
+
+  <section class="panel" aria-labelledby="ratesTitle">
+    <h2 id="ratesTitle">各变形正确率 <small>累计，最弱的排在最上面</small></h2>
+    <div class="rates" id="rates"></div>
+    <div class="reset-row">
+      <span class="muted" id="resetNote">清空后，统计、单词本和复习安排都会重新开始。</span>
+      <button type="button" class="btn small warn" id="resetBtn">清空全部记录</button>
     </div>
   </section>
-  <footer class="note">打字题可以直接输入罗马字（如 kaeranai），会自动转成假名；也可以用日文输入法写假名或汉字。按 Enter 判定、进入下一题。</footer>
+  <footer class="note">复习间隔：答错后 3 分钟再考一次，之后答对一次间隔就拉长（1 天、3 天、7 天、15 天、30 天），30 天那次也答对就算掌握。从没错过的词会越来越少出现。<br>打字题可以直接输入罗马字（如 kaeranai），会自动转成假名。按 Enter 判定、进入下一题。</footer>
 </div>
 
 <script src="js/data.js"></script>
 <script src="js/engine.js"></script>
+<script src="js/progress.js"></script>
+<script src="js/sync.js"></script>
 <script src="js/app.js"></script>
 </body>
 </html>

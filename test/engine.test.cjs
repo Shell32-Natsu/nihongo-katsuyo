@@ -1,4 +1,4 @@
-// 变形引擎测试：node --test test/
+// 变形引擎测试：npm test
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
@@ -7,7 +7,7 @@ const vm = require('node:vm');
 
 // 和浏览器一样，把词库和引擎当作普通脚本加载到同一个全局环境
 const root = path.join(__dirname, '..');
-const src = ['js/data.js', 'js/engine.js'].map(f => fs.readFileSync(path.join(root, f), 'utf8')).join('\n;\n');
+const src = ['public/js/data.js', 'public/js/engine.js'].map(f => fs.readFileSync(path.join(root, f), 'utf8')).join('\n;\n');
 const E = vm.runInNewContext(src + `
 ;({ WORDS, FORMS, conj, check, explain, diagnose, choicesFor, formsFor });`);
 
