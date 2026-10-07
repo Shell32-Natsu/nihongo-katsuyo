@@ -1,6 +1,8 @@
 # 活用練習帳
 
-日语动词和形容词的变形练习网页。按 JLPT N5–N1 分级，要练哪些变形可以自己选，每道题都附带规则讲解和错因诊断。答错的词会自动记进单词本，按间隔安排复习；用 Google 账号登录后，练习记录会在手机、电脑之间同步。
+日语动词和形容词的变形练习网页。按 JLPT N5–N1 分级，要练哪些变形可以自己选，每道题都附带规则讲解和错因诊断。答错的词会自动记进单词本，按间隔安排复习，练习记录在手机、电脑之间同步。
+
+这是私人网站：只有名单里的 Google 账号能登录使用，其他人打开只能看到登录页。
 
 讲解和诊断都由变形规则直接生成，不调用 AI。网页和同步接口一起部署在 Cloudflare Workers 上，数据存在 Cloudflare D1。
 
@@ -13,7 +15,8 @@
 - **错因诊断**：能认出“按二类动词变了”“て形音便记混了”“写成了被动形”“把な形容词当成い形容词”等典型错误
 - **单词本和复习**：答错的词自动记进单词本，到了复习时间会提醒，也会穿插在平时的练习里。可以手动加入或移出
 - **错误统计**：每个词答过几次、错过几次、哪种变形最常错、最近一次写错成什么；各种变形的正确率按从低到高排列
-- **跨设备同步**：用 Google 账号登录后，记录、单词本和练习设置会在所有设备间同步。不登录也能用，记录只保存在当前浏览器里
+- **只对名单里的人开放**：用 Google 账号登录，只有名单里的邮箱能进；从名单删掉的人，下一次打开网页或同步时就会被挡在外面
+- **跨设备同步**：记录、单词本和练习设置在所有登录的设备间同步，离线时先存在本机，联网后自动上传
 - 适配手机，支持深色模式
 
 ## 复习规则
@@ -44,24 +47,25 @@
 
 ### 2. 把密钥填到 GitHub
 
-打开 GitHub 仓库 → **Settings** → **Secrets and variables** → **Actions** → **Secrets** → **New repository secret**，添加两个：
+打开 GitHub 仓库 → **Settings** → **Secrets and variables** → **Actions** → **Secrets** → **New repository secret**，添加三个：
 
 | 名称 | 值 |
 | --- | --- |
 | `CLOUDFLARE_API_TOKEN` | 上一步创建的令牌 |
 | `CLOUDFLARE_ACCOUNT_ID` | 上一步复制的 Account ID |
+| `ALLOWED_EMAILS` | 允许使用的 Google 账号邮箱，写法见下面「管理可以使用的账号」 |
 
 然后到仓库的 **Actions** 页 → **测试并部署** → **Run workflow** 手动跑一次（或者随便推送一次到 `main`）。
 
-第一次部署会自动创建名为 `nihongo-katsuyo` 的 D1 数据库，数据表由 Worker 在第一次请求时自动建好。部署完成后，运行结果的摘要里会显示网址，形如 `https://nihongo-katsuyo.<你的子域>.workers.dev`。此时网站已经可以用，只是还不能登录同步。
+第一次部署会自动创建名为 `nihongo-katsuyo` 的 D1 数据库，数据表由 Worker 在第一次请求时自动建好。部署完成后，运行结果的摘要里会显示网址，形如 `https://nihongo-katsuyo.<你的子域>.workers.dev`。这时打开网址会看到登录页，提示还没有配置 Google 登录。
 
-没配密钥时，部署这一步会跳过并给出提示，测试照常运行。
+没配 Cloudflare 密钥时，部署这一步会跳过并给出提示，测试照常运行。
 
 ### 3. 申请 Google 登录
 
 1. 打开 [Google Cloud Console](https://console.cloud.google.com)，新建一个项目
 2. 进入 **Google Auth Platform**（也叫 OAuth 同意屏幕），用户类型选 **External**，填应用名称和联系邮箱
-3. 在 **Audience** 里把发布状态改成 **In production**，否则只有你加进测试名单的账号能登录。这里只用到基础的姓名、邮箱、头像，不需要 Google 审核
+3. 在 **Audience** 里把发布状态改成 **In production**，否则只有你加进测试名单的账号能登录。这里只用到基础的姓名、邮箱、头像，不需要 Google 审核。谁能进网站由 `ALLOWED_EMAILS` 决定，和这里无关
 4. 在 **Clients** 里新建客户端，类型选 **Web application**，在 **Authorized JavaScript origins** 里填第 2 步得到的网址（不带结尾的 `/`）。用自己的域名的话也把域名加上；本地开发再加一个 `http://localhost:8787`
 5. 复制生成的 **Client ID**（以 `.apps.googleusercontent.com` 结尾）
 
@@ -69,11 +73,25 @@
 
 Client ID 不是机密，放在仓库变量里：GitHub 仓库 → **Settings** → **Secrets and variables** → **Actions** → **Variables** → **New repository variable**，名称填 `GOOGLE_CLIENT_ID`，值填上一步复制的 Client ID。
 
-再手动跑一次 **测试并部署**。刷新网站，账号栏就会出现「使用 Google 账号登录」按钮。
+再手动跑一次 **测试并部署**。打开网站，用名单里的 Google 账号登录就能使用了。
 
-### 可选：网页放在别的域名
+## 管理可以使用的账号
 
-如果网页放在别处（比如 GitHub Pages）、只用 Cloudflare 提供同步接口：把 `public/index.html` 里 `<meta name="katsuyo-api">` 的 `content` 改成 Worker 的网址，在 Cloudflare 后台给 Worker 加变量 `ALLOWED_ORIGINS`（值为网页的地址，比如 `https://shell32-natsu.github.io`，多个用逗号分隔），并把这个地址也加到 Google 客户端的 Authorized JavaScript origins 里。
+名单就是仓库密钥 `ALLOWED_EMAILS`。放在密钥里而不是代码里，是因为这个仓库是公开的，密钥不会出现在代码和公开的运行日志里。
+
+- 多个邮箱用逗号、空格或换行分隔，不区分大小写，比如：
+  ```
+  me@gmail.com
+  friend@gmail.com
+  ```
+- 写成 `@example.com` 表示这个域名下的所有邮箱都可以用（适合公司或学校的 Google 账号）
+- 改名单：在 GitHub 上编辑这个密钥（**Update secret** 会整个替换，要把原来的邮箱也写上），然后手动跑一次 **测试并部署**
+- 加人：重新部署后，对方用名单里的邮箱登录即可
+- 删人：重新部署后，他下一次打开网页或同步时就会被挡在外面，只能看到“没有使用权限”的提示。他的练习记录还留在数据库里，以后加回名单就能恢复
+- 不在名单里的人登录时，登录页会告诉他用的是哪个邮箱、没有权限，不会创建任何记录
+- 名单为空时谁都登录不了，登录页会提示还没设置名单
+
+只认 Google 验证过的邮箱。
 
 ## 本地开发
 
@@ -81,11 +99,11 @@ Client ID 不是机密，放在仓库变量里：GitHub 仓库 → **Settings** 
 
 ```sh
 npm install
-echo 'GOOGLE_CLIENT_ID=你的 Client ID' > .dev.vars   # 不需要登录功能的话可以跳过
-npm run dev                                          # 打开 http://localhost:8787
+printf 'GOOGLE_CLIENT_ID=你的 Client ID\nALLOWED_EMAILS=你的邮箱\n' > .dev.vars
+npm run dev        # 打开 http://localhost:8787
 ```
 
-本地数据库存在 `.wrangler/` 目录里。只想看网页的话，直接用浏览器打开 `public/index.html` 也行，这时只有本机记录、没有登录。
+本地数据库存在 `.wrangler/` 目录里。只想看网页、不需要登录的话，可以用任意静态服务器打开 `public/`（比如 `python3 -m http.server -d public`），这时没有登录，记录只保存在本机。
 
 ## 测试
 
@@ -97,7 +115,7 @@ npm test
 
 - **变形引擎**：常见变形和特例的判定、典型错误的诊断，以及词库里每个词的每种变形都有答案、讲解和 4 个只有一个正确的选项
 - **复习规则**：单词本的间隔升级、答错重来、提前答对不算、权重变化、清空记录，以及两台设备的记录不论按什么顺序合并，结果都一样
-- **后端**：用 Node 自带的 SQLite 模拟 D1，用自己生成的密钥模拟 Google 登录凭证，测试登录验证、两台设备同步、重复上传、设置以较新的为准、用户之间的数据隔离、分页和跨域
+- **后端**：用 Node 自带的 SQLite 模拟 D1，用自己生成的密钥模拟 Google 登录凭证，测试名单（没登录、不在名单、从名单删掉、邮箱没验证、整个域名）、登录凭证验证、拒绝其他网站发来的请求、两台设备同步、重复上传、设置以较新的为准、用户之间的数据隔离和分页
 
 推送和 Pull Request 时，GitHub Actions 会自动跑这些测试；测试不通过就不会部署。
 
@@ -113,7 +131,8 @@ public/              网页（由 Cloudflare 作为静态文件提供）
   js/sync.js         Google 登录和云同步
   js/app.js          界面：设置、出题、复习、单词本、统计
 worker/
-  index.js           同步接口（/api/*）
+  index.js           检查登录和名单、同步接口（/api/*）
+  login.js           登录页
   google.js          Google 登录凭证验证
 test/                测试
 wrangler.toml        Cloudflare 配置
@@ -124,7 +143,7 @@ wrangler.toml        Cloudflare 配置
 
 每答一题记一条记录（时间、单词、变形、对错、答错时写的内容），统计、单词本和复习安排都是由这些记录按时间顺序算出来的。同步时只交换各自缺少的记录，所以几台设备离线练习后再联网，记录会合在一起，不会互相覆盖。练习设置以最后修改的那一次为准。
 
-服务器上保存的内容：Google 账号的 ID、邮箱、名字、头像地址，以及上面的答题记录和练习设置。退出登录会清掉当前设备上的记录（云端保留，重新登录就恢复）；「清空全部记录」会同时清空云端和所有设备。
+服务器上保存的内容：Google 账号的 ID、邮箱、名字、头像地址，以及上面的答题记录和练习设置。登录状态保存在浏览器的 Cookie 里（网页脚本读不到），有效期一年，经常用会自动续期。退出登录会清掉当前设备上的记录（云端保留，重新登录就恢复）；「清空全部记录」会同时清空云端和所有设备。
 
 ## 添加或修改单词
 

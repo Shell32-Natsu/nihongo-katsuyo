@@ -57,6 +57,8 @@ jobs:
 
       - name: 部署
         if: steps.check.outputs.ready == 'true'
+        env:
+          ALLOWED_EMAILS: ${{ secrets.ALLOWED_EMAILS }}
         run: |
           # 第一次部署会自动创建 D1 数据库 nihongo-katsuyo，之后按名字找到同一个库；
           # 数据表由 Worker 在第一次请求时自动建好
@@ -64,7 +66,15 @@ jobs:
           if [ -n "$GOOGLE_CLIENT_ID" ]; then
             args+=(--var "GOOGLE_CLIENT_ID:$GOOGLE_CLIENT_ID")
           else
-            echo "::notice title=还没有 Google 登录::没有设置仓库变量 GOOGLE_CLIENT_ID。网站可以正常练习，但不能登录同步。"
+            echo "::warning title=还没有 Google 登录::没有设置仓库变量 GOOGLE_CLIENT_ID，谁都登录不了网站。"
+          fi
+          # 名单可以用逗号、分号、空格或换行分隔，统一成逗号分隔再传给 Worker
+          list=$(printf '%s' "$ALLOWED_EMAILS" | tr -s '[:space:];' ',' | sed 's/^,//; s/,$//')
+          if [ -n "$list" ]; then
+            echo "::add-mask::$list"
+            args+=(--var "ALLOWED_EMAILS:$list")
+          else
+            echo "::warning title=没有设置允许使用的账号::没有设置仓库密钥 ALLOWED_EMAILS，谁都登录不了网站。"
           fi
           set -o pipefail
           npx wrangler "${args[@]}" 2>&1 | tee deploy.log

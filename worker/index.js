@@ -1,16 +1,22 @@
 // 活用練習帳 · Cloudflare Worker
-// 网页本身由 Workers 静态资源（public/）提供，这里只处理 /api/*：
-//   GET  /api/config        前端需要的配置（Google 客户端 ID）
-//   POST /api/auth/google   用 Google 登录凭证换本站的登录令牌
+//
+// 整个网站只对名单里的 Google 账号开放（名单在环境变量 ALLOWED_EMAILS 里）。
+// 每个请求都先经过这里：
+//   - 没登录、登录已过期或不在名单里：网页请求返回登录页，其他请求返回 401/403
+//   - 登录且在名单里：网页和静态文件交给 Workers 静态资源（public/）
+// 接口：
+//   POST /api/auth/google   用 Google 登录凭证换登录 Cookie（只发给名单里的账号）
 //   GET  /api/me            当前登录的用户
 //   POST /api/logout        退出登录
 //   POST /api/sync          上传本机新增的答题记录和设置，取回其他设备的记录
 
 import { verifyGoogleIdToken, fetchGoogleKeys, AuthError } from './google.js';
+import { loginPage } from './login.js';
 
 const DAY = 86400e3;
 const SESSION_TTL = 365 * DAY;
 const SESSION_RENEW = 180 * DAY;   // 剩余有效期不到这么久时自动续期
+const COOKIE = 'katsuyo_session';
 const MAX_BODY = 600_000;
 const MAX_EVENTS = 500;            // 每次最多上传的事件数
 const PAGE = 1000;                 // 每次最多下发的事件数
@@ -44,27 +50,49 @@ function ensureSchema(db) {
 }
 
 class HttpError extends Error {
-  constructor(status, message) { super(message); this.status = status; }
+  constructor(status, message, extra = {}) { super(message); this.status = status; this.extra = extra; }
 }
 
-function json(data, status = 200, extra = {}) {
+function json(data, status = 200, headers = {}) {
   return new Response(JSON.stringify(data), {
     status,
-    headers: { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store', ...extra },
+    headers: { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store', ...headers },
   });
 }
 
-function corsHeaders(request, env) {
-  const origin = request.headers.get('Origin');
-  const allowed = String(env.ALLOWED_ORIGINS || '').split(',').map(s => s.trim()).filter(Boolean);
-  if (!origin || !allowed.includes(origin)) return {};
-  return {
-    'Access-Control-Allow-Origin': origin,
-    'Access-Control-Allow-Headers': 'Authorization, Content-Type',
-    'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
-    'Access-Control-Max-Age': '86400',
-    Vary: 'Origin',
-  };
+function html(body, status = 200) {
+  return new Response(body, {
+    status,
+    headers: {
+      'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store',
+      'x-frame-options': 'DENY', 'referrer-policy': 'strict-origin-when-cross-origin',
+    },
+  });
+}
+
+// ---- 名单 ----
+// ALLOWED_EMAILS：用逗号、分号、空格或换行分隔；「@example.com」表示这个域名下的所有邮箱。不区分大小写。
+export function parseAllowList(raw) {
+  return String(raw || '').split(/[\s,;]+/).map(s => s.trim().toLowerCase()).filter(Boolean);
+}
+export function isAllowed(email, list) {
+  const e = String(email || '').trim().toLowerCase();
+  if (!e || !e.includes('@')) return false;
+  const domain = e.slice(e.lastIndexOf('@'));
+  return list.some(x => x === e || (x.startsWith('@') && x === domain));
+}
+
+// ---- Cookie ----
+function readCookie(request, name) {
+  for (const part of (request.headers.get('cookie') || '').split(';')) {
+    const i = part.indexOf('=');
+    if (i > 0 && part.slice(0, i).trim() === name) return part.slice(i + 1).trim();
+  }
+  return null;
+}
+function sessionCookie(url, token, maxAgeSec) {
+  const secure = url.protocol === 'https:' ? '; Secure' : '';
+  return `${COOKIE}=${token}; Path=/; HttpOnly; SameSite=Lax; Max-Age=${maxAgeSec}${secure}`;
 }
 
 async function readJson(request) {
@@ -90,20 +118,34 @@ function publicUser(row, id) {
   return { id, name: row.name || '', email: row.email || '', picture: row.picture || '' };
 }
 
-async function requireUser(request, env, ctx) {
-  const m = /^Bearer\s+(\S+)$/.exec(request.headers.get('Authorization') || '');
-  if (!m) throw new HttpError(401, '没有登录');
-  const hash = await sha256(m[1]);
+/**
+ * 按 Cookie 找出当前用户。返回：
+ *   { status: 'ok', user, hash }      已登录且在名单里
+ *   { status: 'none' }                没登录或登录已过期
+ *   { status: 'denied', email, hash } 已登录但不在名单里（名单改过）
+ */
+async function currentUser(request, env, ctx) {
+  const token = readCookie(request, COOKIE);
+  if (!token || !/^[A-Za-z0-9_-]{20,100}$/.test(token)) return { status: 'none' };
+  const hash = await sha256(token);
   const row = await env.DB.prepare(
     `SELECT s.user_id, s.expires_at, u.name, u.email, u.picture
-       FROM sessions s LEFT JOIN users u ON u.id = s.user_id WHERE s.token_hash = ?1`).bind(hash).first();
+       FROM sessions s JOIN users u ON u.id = s.user_id WHERE s.token_hash = ?1`).bind(hash).first();
   const now = Date.now();
-  if (!row || row.expires_at < now) throw new HttpError(401, '登录已过期，请重新登录');
+  if (!row || row.expires_at < now) return { status: 'none' };
+  if (!isAllowed(row.email, parseAllowList(env.ALLOWED_EMAILS))) return { status: 'denied', email: row.email, hash };
   if (row.expires_at - now < SESSION_RENEW) {
     const renew = env.DB.prepare('UPDATE sessions SET expires_at = ?1 WHERE token_hash = ?2').bind(now + SESSION_TTL, hash).run();
     if (ctx && ctx.waitUntil) ctx.waitUntil(renew); else await renew;
   }
-  return { ...publicUser(row, row.user_id), hash };
+  return { status: 'ok', user: publicUser(row, row.user_id), hash };
+}
+
+async function requireUser(request, env, ctx) {
+  const r = await currentUser(request, env, ctx);
+  if (r.status === 'none') throw new HttpError(401, '没有登录或登录已过期，请刷新页面重新登录');
+  if (r.status === 'denied') throw new HttpError(403, '这个账号没有使用权限', { email: r.email });
+  return r;
 }
 
 // 校验并整理上传的事件；不合格的单独列出来，让前端丢掉，不影响其他事件
@@ -143,15 +185,19 @@ function cleanSettings(s) {
 
 export function createApp({ getGoogleKeys = fetchGoogleKeys } = {}) {
   const routes = {
-    'GET /api/config': async (req, env) => ({ googleClientId: env.GOOGLE_CLIENT_ID || null }),
-
-    'POST /api/auth/google': async (req, env) => {
+    'POST /api/auth/google': async (req, env, ctx, url) => {
+      const list = parseAllowList(env.ALLOWED_EMAILS);
+      if (!list.length) throw new HttpError(403, '网站还没有设置允许使用的账号');
       const { credential } = await readJson(req);
       const p = await verifyGoogleIdToken(credential, env.GOOGLE_CLIENT_ID, { getKeys: getGoogleKeys });
+      // 只认 Google 验证过的邮箱，否则名单形同虚设
+      if (!p.email || p.email_verified !== true) throw new HttpError(403, '这个 Google 账号的邮箱还没有验证');
+      if (!isAllowed(p.email, list)) throw new HttpError(403, '这个账号没有使用权限', { email: p.email });
+
       const id = 'g:' + p.sub;
       const now = Date.now();
       const token = b64url(crypto.getRandomValues(new Uint8Array(32)));
-      const user = { name: p.name || '', email: p.email || '', picture: p.picture || '' };
+      const user = { name: p.name || '', email: p.email, picture: p.picture || '' };
       await env.DB.batch([
         env.DB.prepare(
           `INSERT INTO users (id, email, name, picture, created_at, last_login) VALUES (?1, ?2, ?3, ?4, ?5, ?5)
@@ -161,22 +207,22 @@ export function createApp({ getGoogleKeys = fetchGoogleKeys } = {}) {
         env.DB.prepare('INSERT INTO sessions (token_hash, user_id, created_at, expires_at) VALUES (?1, ?2, ?3, ?4)')
           .bind(await sha256(token), id, now, now + SESSION_TTL),
       ]);
-      return { token, user: publicUser(user, id) };
+      return json({ user: publicUser(user, id) }, 200, { 'set-cookie': sessionCookie(url, token, SESSION_TTL / 1000) });
     },
 
     'GET /api/me': async (req, env, ctx) => {
-      const { hash, ...user } = await requireUser(req, env, ctx);
+      const { user } = await requireUser(req, env, ctx);
       return { user };
     },
 
-    'POST /api/logout': async (req, env, ctx) => {
-      const { hash } = await requireUser(req, env, ctx);
-      await env.DB.prepare('DELETE FROM sessions WHERE token_hash = ?1').bind(hash).run();
-      return { ok: true };
+    'POST /api/logout': async (req, env, ctx, url) => {
+      const r = await currentUser(req, env, ctx);
+      if (r.hash) await env.DB.prepare('DELETE FROM sessions WHERE token_hash = ?1').bind(r.hash).run();
+      return json({ ok: true }, 200, { 'set-cookie': sessionCookie(url, '', 0) });
     },
 
     'POST /api/sync': async (req, env, ctx) => {
-      const { id: uid } = await requireUser(req, env, ctx);
+      const { user: { id: uid } } = await requireUser(req, env, ctx);
       const body = await readJson(req);
       const since = Number.isSafeInteger(body.since) && body.since >= 0 ? body.since : 0;
       const { events, rejected } = cleanEvents(body.events);
@@ -219,30 +265,49 @@ export function createApp({ getGoogleKeys = fetchGoogleKeys } = {}) {
     },
   };
 
+  async function handleApi(request, env, ctx, url) {
+    const handler = routes[`${request.method} ${url.pathname}`];
+    if (!handler) {
+      const known = Object.keys(routes).some(r => r.endsWith(' ' + url.pathname));
+      throw new HttpError(known ? 405 : 404, known ? '不支持这个请求方法' : '没有这个接口');
+    }
+    // 写操作只接受本站页面发来的请求（防止别的网站借用户的 Cookie 发请求）
+    if (request.method !== 'GET') {
+      const origin = request.headers.get('origin');
+      if (origin && origin !== url.origin) throw new HttpError(403, '不接受来自其他网站的请求');
+      if (!(request.headers.get('content-type') || '').includes('application/json')) throw new HttpError(415, '请求必须是 JSON');
+    }
+    const out = await handler(request, env, ctx, url);
+    return out instanceof Response ? out : json(out);
+  }
+
+  // 网页和静态文件：登录且在名单里才给，否则给登录页
+  async function handlePage(request, env, ctx) {
+    const r = await currentUser(request, env, ctx);
+    if (r.status === 'ok') return env.ASSETS.fetch(request);
+    const wantsPage = request.method === 'GET' && (request.headers.get('accept') || '').includes('text/html');
+    if (!wantsPage) return new Response(r.status === 'denied' ? '没有使用权限' : '请先登录', { status: r.status === 'denied' ? 403 : 401, headers: { 'cache-control': 'no-store' } });
+    return html(loginPage({
+      clientId: env.GOOGLE_CLIENT_ID || null,
+      listReady: parseAllowList(env.ALLOWED_EMAILS).length > 0,
+      denied: r.status === 'denied' ? r.email : '',
+    }));
+  }
+
   return {
     async fetch(request, env, ctx) {
       const url = new URL(request.url);
-      if (!url.pathname.startsWith('/api/')) {
-        return env.ASSETS ? env.ASSETS.fetch(request) : new Response('Not found', { status: 404 });
-      }
-      const cors = corsHeaders(request, env);
-      if (request.method === 'OPTIONS') return new Response(null, { status: 204, headers: cors });
-      const handler = routes[`${request.method} ${url.pathname}`];
+      const isApi = url.pathname.startsWith('/api/');
       try {
-        if (!handler) {
-          const known = Object.keys(routes).some(r => r.endsWith(' ' + url.pathname));
-          throw new HttpError(known ? 405 : 404, known ? '不支持这个请求方法' : '没有这个接口');
-        }
-        if (url.pathname !== '/api/config') {
-          if (!env.DB) throw new HttpError(503, '服务器没有配置数据库');
-          await ensureSchema(env.DB);
-        }
-        return json(await handler(request, env, ctx), 200, cors);
+        if (!env.DB) throw new HttpError(503, '服务器没有配置数据库');
+        await ensureSchema(env.DB);
+        return isApi ? await handleApi(request, env, ctx, url) : await handlePage(request, env, ctx);
       } catch (e) {
-        if (e instanceof HttpError) return json({ error: e.message }, e.status, cors);
-        if (e instanceof AuthError) return json({ error: e.message }, 401, cors);
-        console.error(e);
-        return json({ error: '服务器出错了，请稍后再试' }, 500, cors);
+        let status = 500, message = '服务器出错了，请稍后再试', extra = {};
+        if (e instanceof HttpError) { status = e.status; message = e.message; extra = e.extra; }
+        else if (e instanceof AuthError) { status = 401; message = e.message; }
+        else console.error(e);
+        return isApi ? json({ error: message, ...extra }, status) : new Response(message, { status, headers: { 'content-type': 'text/plain; charset=utf-8' } });
       }
     },
   };

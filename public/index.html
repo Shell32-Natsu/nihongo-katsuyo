@@ -4,6 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>活用練習帳</title>
+<meta name="robots" content="noindex">
 <meta name="description" content="日语动词・形容词变形练习：按 JLPT N5–N1 分级，变形类型可自选，每题附规则讲解和错因诊断。">
 <meta name="theme-color" content="#eef1f6" media="(prefers-color-scheme: light)">
 <meta name="theme-color" content="#0f141d" media="(prefers-color-scheme: dark)">
@@ -12,8 +13,6 @@
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Klee+One:wght@400;600&family=Zen+Kaku+Gothic+New:wght@400;500;700&family=IBM+Plex+Mono:wght@500&display=swap">
 <link rel="stylesheet" href="style.css">
-<!-- 同步接口的地址。网页和接口在同一个 Cloudflare Worker 上时留空；网页放在别处（比如 GitHub Pages）时填 Worker 的网址 -->
-<meta name="katsuyo-api" content="">
 </head>
 <body>
 <div class="wrap">
@@ -26,7 +25,7 @@
   </header>
 
   <div class="account" id="account">
-    <div class="acct-main"><div class="acct-text"><span class="acct-status"><span class="dot"></span><span>记录保存在这台设备上</span></span></div></div>
+    <div class="acct-main"><div class="acct-text"><span class="acct-status busy"><span class="dot"></span><span>正在连接…</span></span></div></div>
   </div>
 
   <details class="setup" id="setup">
