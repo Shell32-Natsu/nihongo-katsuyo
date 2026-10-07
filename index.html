@@ -1,0 +1,81 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>活用練習帳</title>
+<meta name="description" content="日语动词・形容词变形练习：按 JLPT N5–N1 分级，变形类型可自选，每题附规则讲解和错因诊断。">
+<meta name="theme-color" content="#eef1f6" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#0f141d" media="(prefers-color-scheme: dark)">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='14' fill='%232b4796'/%3E%3Ctext x='32' y='45' font-size='38' text-anchor='middle' fill='white' font-family='serif'%3E%E6%B4%BB%3C/text%3E%3C/svg%3E">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Klee+One:wght@400;600&family=Zen+Kaku+Gothic+New:wght@400;500;700&family=IBM+Plex+Mono:wght@500&display=swap">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div class="wrap">
+  <header class="top">
+    <div class="brand">
+      <h1 lang="ja">活用練習帳</h1>
+      <p>日语动词・形容词变形练习 · 按 JLPT 分级</p>
+    </div>
+    <div class="score" id="score" aria-live="polite"></div>
+  </header>
+
+  <details class="setup" id="setup">
+    <summary><span class="sum-label">练习设置</span><span class="sum-text" id="sumText"></span><span class="sum-caret" aria-hidden="true">▾</span></summary>
+    <div class="setup-body">
+      <div class="field">
+        <h3>JLPT 级别<span class="tools"><button type="button" class="mini" data-all="levels">全选</button></span></h3>
+        <div class="chips" id="levels"></div>
+      </div>
+      <div class="field">
+        <h3>词类<span class="tools"><button type="button" class="mini" data-all="classes">全选</button></span></h3>
+        <div class="chips" id="classes"></div>
+      </div>
+      <div class="field">
+        <h3>动词变形<span class="tools"><button type="button" class="mini" data-all="vforms">全选</button><button type="button" class="mini" data-none="vforms">清空</button></span></h3>
+        <div id="vforms"></div>
+      </div>
+      <div class="field">
+        <h3>形容词变形<span class="tools"><button type="button" class="mini" data-all="aforms">全选</button><button type="button" class="mini" data-none="aforms">清空</button></span></h3>
+        <div id="aforms"></div>
+      </div>
+      <div class="field">
+        <h3>作答方式</h3>
+        <div class="row">
+          <div class="seg" role="radiogroup" aria-label="作答方式">
+            <label><input type="radio" name="mode" id="mode-type" value="type"><span>打字</span></label>
+            <label><input type="radio" name="mode" id="mode-choice" value="choice"><span>四选一</span></label>
+          </div>
+          <label class="toggle"><input type="checkbox" id="hint"> 题目上显示词类</label>
+        </div>
+      </div>
+    </div>
+  </details>
+
+  <main class="sheet" id="sheet" aria-live="polite"></main>
+
+  <section class="review">
+    <div class="panel">
+      <h2>各变形正确率 <small>累计</small></h2>
+      <div class="rates" id="rates"></div>
+    </div>
+    <div class="panel">
+      <h2>错题本 <small id="mcount"></small></h2>
+      <ul class="mlist" id="mlist"></ul>
+      <div class="row">
+        <button type="button" class="btn small ghost" id="drillBtn">专练错题</button>
+        <button type="button" class="btn small warn" id="resetBtn">清空记录</button>
+      </div>
+    </div>
+  </section>
+  <footer class="note">打字题可以直接输入罗马字（如 kaeranai），会自动转成假名；也可以用日文输入法写假名或汉字。按 Enter 判定、进入下一题。</footer>
+</div>
+
+<script src="js/data.js"></script>
+<script src="js/engine.js"></script>
+<script src="js/app.js"></script>
+</body>
+</html>
