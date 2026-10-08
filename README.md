@@ -39,7 +39,7 @@
 
 ### 1. 创建 Cloudflare API 令牌
 
-1. 登录 [Cloudflare 后台](https://dash.cloudflare.com)。如果从来没用过 Workers，先打开一次 **Workers & Pages** 页面，按提示选一个 `workers.dev` 子域名
+1. 登录 [Cloudflare 后台](https://dash.cloudflare.com)，打开 **Workers & Pages** 页面
 2. 在 **Workers & Pages** 页面右侧找到 **Account ID** 并复制（它也是后台网址里 `dash.cloudflare.com/` 后面那串字符）
 3. 点右上角头像 → **Profile** → **API Tokens** → **Create Token**，选模板 **Edit Cloudflare Workers**
 4. 在权限里再加一行：**Account** → **D1** → **Edit**（用来创建和读写数据库）
@@ -57,7 +57,9 @@
 
 然后到仓库的 **Actions** 页 → **测试并部署** → **Run workflow** 手动跑一次（或者随便推送一次到 `main`）。
 
-第一次部署会自动创建名为 `nihongo-katsuyo` 的 D1 数据库，数据表由 Worker 在第一次请求时自动建好。部署完成后，运行结果的摘要里会显示网址，形如 `https://nihongo-katsuyo.<你的子域>.workers.dev`。这时网站已经可以练习，只是还没有登录同步的按钮。
+第一次部署会自动创建名为 `nihongo-katsuyo` 的 D1 数据库，数据表由 Worker 在第一次请求时自动建好。部署完成后，网站在 **https://katsuyo.xiadong.info**，运行结果的摘要里也会显示这个网址。这时网站已经可以练习，只是还没有登录同步的按钮。
+
+网址在 `wrangler.toml` 的 `[[routes]]` 里设置。部署时 Cloudflare 会自动创建这个子域名的 DNS 记录和 HTTPS 证书，所以域名（这里是 `xiadong.info`）必须托管在同一个 Cloudflare 账号下。注意：如果这个子域名原来已经有 DNS 记录，自动部署会直接覆盖它，换子域名前先确认没被别的服务占用。`workers.dev` 地址已经用 `workers_dev = false` 关掉，网站只有这一个地址。
 
 没配 Cloudflare 密钥时，部署这一步会跳过并给出提示，测试照常运行。
 
@@ -66,7 +68,7 @@
 1. 打开 [Google Cloud Console](https://console.cloud.google.com)，新建一个项目
 2. 进入 **Google Auth Platform**（也叫 OAuth 同意屏幕），用户类型选 **External**，填应用名称和联系邮箱
 3. 在 **Audience** 里把发布状态改成 **In production**，否则只有你加进测试名单的账号能登录。这里只用到基础的姓名、邮箱、头像，不需要 Google 审核。谁能进网站由 `ALLOWED_EMAILS` 决定，和这里无关
-4. 在 **Clients** 里新建客户端，类型选 **Web application**，在 **Authorized JavaScript origins** 里填第 2 步得到的网址（不带结尾的 `/`）。用自己的域名的话也把域名加上；本地开发再加一个 `http://localhost:8787`
+4. 在 **Clients** 里新建客户端，类型选 **Web application**，在 **Authorized JavaScript origins** 里填网站地址 `https://katsuyo.xiadong.info`（不带结尾的 `/`）；本地开发再加一个 `http://localhost:8787`。以后换域名的话，这里也要加上新地址
 5. 复制生成的 **Client ID**（以 `.apps.googleusercontent.com` 结尾）
 
 ### 4. 把 Client ID 填到 GitHub

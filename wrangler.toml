@@ -4,6 +4,9 @@ main = "worker/index.js"
 compatibility_date = "2026-09-01"
 # 部署时保留已经设置过的变量（GOOGLE_CLIENT_ID 和 ALLOWED_EMAILS 由 GitHub Actions 传入）
 keep_vars = true
+# 只用下面 [[routes]] 里的域名，关掉 nihongo-katsuyo.<子域名>.workers.dev 和预览地址，免得两个地址各存一份本机记录
+workers_dev = false
+preview_urls = false
 
 [assets]
 directory = "./public"
