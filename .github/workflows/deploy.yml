@@ -78,7 +78,10 @@ jobs:
           fi
           set -o pipefail
           npx wrangler "${args[@]}" 2>&1 | tee deploy.log
-          url=$(grep -oE 'https://[A-Za-z0-9.-]+\.workers\.dev' deploy.log | head -n 1 || true)
+          # 优先显示自己的域名，没有的话显示 workers.dev 地址
+          domain=$(grep -oE '[A-Za-z0-9.-]+ \(custom domain\)' deploy.log | head -n 1 | cut -d' ' -f1 || true)
+          url=${domain:+https://$domain}
+          [ -n "$url" ] || url=$(grep -oE 'https://[A-Za-z0-9.-]+\.workers\.dev' deploy.log | head -n 1 || true)
           if [ -n "$url" ]; then
             echo "### 已部署：$url" >> "$GITHUB_STEP_SUMMARY"
             echo "::notice title=已部署::$url"
